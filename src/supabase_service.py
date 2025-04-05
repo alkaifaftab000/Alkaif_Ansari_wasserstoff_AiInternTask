@@ -7,7 +7,7 @@ import os
 import io
 import mimetypes
 from supabase import create_client, Client
-# from supabase.storage import StorageFileAPI
+import logging
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -187,5 +187,44 @@ def store_analysis_in_supabase(analysis_data):
         print(f"Email UUID {email_uuid} marked as processed.")
     except Exception as e:
         print(f"Error storing analysis for email UUID {analysis_data['email_id']}: {e}")
+
+def store_extracted_text_in_supabase(attachment_id, extracted_text):
+    """
+    Store extracted text in the 'extracted_text' column of the 'attachments' table.
+    """
+    try:
+        # Update the extracted_text in the attachments table
+        response = supabase.table("attachments").update(
+            {"extracted_text": extracted_text}
+        ).eq("id", attachment_id).execute()
+
+        # Proper success check
+        if not response.data:  # If response.data is empty, the update failed
+            logging.error(f"Failed to update extracted text for attachment ID: {attachment_id}")
+        else:
+            logging.info(f"Successfully updated extracted text for attachment ID: {attachment_id}")
+
+        # Debug log to inspect the full response structure
+        logging.debug(f"Supabase response: {vars(response)}")
+    except Exception as e:
+        logging.error(f"Error storing extracted text for attachment ID {attachment_id}: {str(e)}")
+
+def get_attachments_by_email_id(email_id):
+    """
+    Fetch attachments for a given email ID from the database.
+    :param email_id: The UUID of the email.
+    :return: A list of attachments.
+    """
+    try:
+        response = supabase.table("attachments").select("*").eq("email_id", email_id).execute()
+        if response.data:
+            logging.debug(f"Fetched {len(response.data)} attachments for email ID: {email_id}")
+            return response.data
+        else:
+            logging.warning(f"No attachments found for email ID: {email_id}")
+            return []
+    except Exception as e:
+        logging.error(f"Error fetching attachments for email ID {email_id}: {e}")
+        return []
 
 

@@ -8,6 +8,7 @@ import logging
 from gmail_service import authenticate_gmail, fetch_unread_emails, fetch_all_emails
 from supabase_service import store_emails_in_supabase
 from summarization_service import summarize_fetched_emails, summarize_emails
+from attachment_service import analyze_attachments  # Import the new service for attachment analysis
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -30,13 +31,23 @@ def process_emails(mode, batch_size):
 
     if messages:
         # Store emails in Supabase
-        store_emails_in_supabase(messages)
+        store_emails_in_supabase(emails=messages)  # Pass the messages to store_emails_in_supabase
         logging.info(f"{len(messages)} emails have been successfully fetched and stored in Supabase.")
+
+        # Ask the user if they want to analyze attachments
+        user_input = input("Do you want to analyze attachments? (yes/no): ").strip().lower()
+        analyze_attachments_flag = user_input in ["yes", "y"]
+
+        if analyze_attachments_flag:
+            logging.info("Analyzing attachments...")
+            analyze_attachments()  # Call analyze_attachments without arguments
+        else:
+            logging.info("Skipping attachment analysis.")
 
         # Ask the user if they want to proceed with summarization
         user_input = input("Do you want to proceed with summarization? (yes/no): ").strip().lower()
         if user_input in ["yes", "y"]:
-            summarize_fetched_emails(messages)
+            summarize_fetched_emails(messages, analyze_attachments_flag)  # Pass the flag to summarization
         else:
             logging.info("Exiting without summarization.")
     else:

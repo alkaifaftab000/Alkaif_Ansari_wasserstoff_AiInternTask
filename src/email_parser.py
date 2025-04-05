@@ -35,34 +35,48 @@ def parse_email(email, gmail_service):
     try:
         # Extract headers
         headers = {header['name']: header['value'] for header in email['payload']['headers']}
-        sender = headers.get('From', 'Unknown Sender')
+        sender = headers.get('From', None)
         recipients = {
             "to": headers.get('To', '').split(','),
             "cc": headers.get('Cc', '').split(','),
             "bcc": headers.get('Bcc', '').split(',')
         }
-        subject = headers.get('Subject', 'No Subject')
+        subject = headers.get('Subject', "No Subject")  # Provide default value for missing subject
+
+        # Log a warning if the subject is missing
+        if subject == "No Subject":
+            logging.warning(f"Email ID {email.get('id')} is missing a subject. Using default value.")
 
         # Extract and format the timestamp
-        raw_timestamp = headers.get('Date', 'Unknown Date')
+        raw_timestamp = headers.get('Date', None)
         timestamp = format_timestamp(raw_timestamp)
-
-        if not timestamp:
-            raise ValueError("Invalid or missing timestamp.")
 
         # Extract body
         body = extract_email_body(email['payload'])
+        if not body.strip():
+            logging.warning(f"Email ID {email.get('id')} has no body content. Adding placeholder.")
+            body = "No body content"
 
         # Extract attachments
         attachments = extract_attachments(email, gmail_service)
 
         # Add Email ID and Thread ID
-        email_id = email.get('id', 'Unknown ID')
-        thread_id = email.get('threadId', 'Unknown Thread ID')
+        email_id = email.get('id', None)
+        thread_id = email.get('threadId', None)
 
         # Validate required fields
-        if not sender or not recipients["to"] or not subject or not timestamp or not body:
-            raise ValueError("Missing required email fields.")
+        missing_fields = []
+        if not sender:
+            missing_fields.append("sender")
+        if not recipients["to"]:
+            missing_fields.append("recipients (to)")
+        if not timestamp:
+            missing_fields.append("timestamp")
+        if not body:
+            missing_fields.append("body")
+
+        if missing_fields:
+            logging.warning(f"Email ID {email_id} is missing fields: {', '.join(missing_fields)}. Processing with defaults.")
 
         logging.info(f"Successfully parsed email ID: {email_id}")
         return {
