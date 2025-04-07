@@ -169,24 +169,41 @@ def store_analysis_in_supabase(analysis_data):
     Store email analysis (summary and insights) in the Supabase analysis table.
     """
     try:
-        # Retrieve the correct UUID for the email
-        email_uuid = get_email_uuid_by_message_id(analysis_data["email_id"])
-        if not email_uuid:
-            print(f"Cannot store analysis: No UUID found for message_id {analysis_data['email_id']}")
-            return
+        # The email_id in analysis_data is already the UUID from the database
+        response = supabase.table("analysis").insert({
+            "email_id": str(analysis_data["email_id"]),  # Ensure UUID is string
+            "thread_id": analysis_data.get("thread_id"),
+            "summary": analysis_data["summary"],
+            "insights": analysis_data["insights"],
+            "action_type": analysis_data["action_type"],
+            "search_performed": analysis_data.get("search_performed", False),
+            "search_query": analysis_data.get("search_query", ""),
+            "search_results": analysis_data.get("search_results"),
+            "search_answer": analysis_data.get("search_answer", ""),
+            "slack_notification_sent": analysis_data.get("slack_notification_sent", False),
+            "slack_channel": analysis_data.get("slack_channel"),
+            "slack_message_id": analysis_data.get("slack_message_id")
+        }).execute()
 
-        # Update the analysis_data with the correct email_id (UUID)
-        analysis_data["email_id"] = email_uuid
-
-        # Insert analysis data into the analysis table
-        response = supabase.table("analysis").insert(analysis_data).execute()
-        print(f"Analysis stored successfully for email UUID: {email_uuid}")
-
-        # Mark the email as processed in the emails table
-        supabase.table("emails").update({"processed": True}).eq("id", email_uuid).execute()
-        print(f"Email UUID {email_uuid} marked as processed.")
+        if response.data:
+            logging.info(f"Analysis stored successfully for email: {analysis_data['email_id']}")
+            
+            # Mark the email as processed
+            update_response = supabase.table("emails").update(
+                {"processed": True}
+            ).eq("id", str(analysis_data["email_id"])).execute()  # Ensure UUID is string
+            
+            if update_response.data:
+                logging.info(f"Email {analysis_data['email_id']} marked as processed")
+            else:
+                logging.error(f"Failed to mark email {analysis_data['email_id']} as processed")
+        else:
+            logging.error(f"Failed to store analysis for email: {analysis_data['email_id']}")
+            
     except Exception as e:
-        print(f"Error storing analysis for email UUID {analysis_data['email_id']}: {e}")
+        logging.error(f"Error storing analysis: {str(e)}")
+        import traceback
+        logging.error(traceback.format_exc())
 
 def store_extracted_text_in_supabase(attachment_id, extracted_text):
     """

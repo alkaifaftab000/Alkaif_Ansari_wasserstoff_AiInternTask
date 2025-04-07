@@ -78,6 +78,11 @@ def summarize_text(text):
         previous_communications: [integer number of previous emails in thread]
         response_urgency: [low, medium, high]
         key_stakeholders: [comma separated emails of important people in thread]
+
+        ### SEARCH_REQUIRED
+        required: [true/false]
+        search_query: [extracted search terms]
+        context_needed: [what kind of information we're looking for]
         """
 
         # Payload for the API
@@ -87,7 +92,7 @@ def summarize_text(text):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text}
             ],
-            "max_tokens": 500,
+            "max_tokens": 2000,
             "temperature": 0.7
         }
 
@@ -109,3 +114,72 @@ def summarize_text(text):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error summarizing text: {e}")
         return {"structured_output": "Error generating structured output."}
+
+def update_email_attachment_summary(email_id, summary):
+    """
+    Update the attachment_summary column in the emails table
+    """
+    try:
+        response = supabase.table("emails").update(
+            {"attachment_summary": summary}
+        ).eq("id", email_id).execute()
+        
+        if response.data:
+            logging.info(f"Updated attachment_summary for email {email_id}")
+        else:
+            logging.error(f"Failed to update attachment_summary for email {email_id}")
+    except Exception as e:
+        logging.error(f"Error updating attachment_summary: {e}")
+
+def process_email_attachments(email_id):
+    """
+    Process all attachments for an email and update the email's attachment_summary
+    """
+    try:
+        # Get combined summary of all attachments
+        combined_summary = aggregate_attachment_summaries(email_id)
+        
+        if combined_summary:
+            # Update email's attachment_summary
+            update_email_attachment_summary(email_id, combined_summary)
+            logging.info(f"Processed attachments for email {email_id}")
+        else:
+            logging.info(f"No attachment summaries generated for email {email_id}")
+    except Exception as e:
+        logging.error(f"Error processing email attachments: {e}")
+
+def analyze_attachments():
+    """
+    Main function to process attachments and update email summaries
+    """
+    try:
+        # First, process any unprocessed attachments
+        response = supabase.table("attachments").select("*").is_("extracted_text", None).execute()
+        attachments = response.data
+
+        if not attachments:
+            logging.info("No new attachments to process")
+            return
+
+        logging.info(f"Found {len(attachments)} attachments to process")
+
+        # Track which emails need summary updates
+        processed_email_ids = set()
+
+        # Process each attachment
+        for attachment in attachments:
+            try:
+                # ... (existing attachment processing code) ...
+
+                # If text was extracted successfully, add email_id to processed set
+                if extracted_text:
+                    processed_email_ids.add(attachment["email_id"])
+            except Exception as e:
+                logging.error(f"Error processing attachment: {e}")
+
+        # Update summaries for all affected emails
+        for email_id in processed_email_ids:
+            process_email_attachments(email_id)
+
+    except Exception as e:
+        logging.error(f"Error in analyze_attachments: {e}")
