@@ -78,10 +78,22 @@ def process_emails(mode, batch_size):
         else:
             logging.info("Skipping email analysis")
 
+        # Phase 4: Slack Notifications
+        slack_notification_input = input("\nDo you want to process Slack notifications? (yes/no): ").strip().lower()
+        if slack_notification_input in ['yes', 'y']:
+            logging.info("Phase 4: Starting Slack notification processing")
+            from summarization_service import process_slack_notifications
+            process_slack_notifications()
+            logging.info("Phase 4 Complete: Slack notifications processed")
+        else:
+            logging.info("Skipping Slack notifications")
+
         logging.info("Email processing workflow completed")
 
     except Exception as e:
         logging.error(f"Error in email processing workflow: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
 
 def analyze_attachments():
     """

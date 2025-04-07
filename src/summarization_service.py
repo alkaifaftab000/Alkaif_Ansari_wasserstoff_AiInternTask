@@ -263,55 +263,109 @@ Thread Context:
         import traceback
         logging.error(traceback.format_exc())
 
+def process_slack_notifications():
+    """
+    Process Phase 4: Send notifications to Slack for emails that require it
+    """
+    try:
+        # Get emails that need Slack notification
+        response = supabase.table("analysis").select(
+            "id",
+            "email_id",
+            "summary",
+            "insights",
+            "action_type"
+        ).eq("action_type", "FORWARD_TO_SLACK").eq("slack_notification_sent", False).execute()
+
+        pending_notifications = response.data
+        if not pending_notifications:
+            logging.info("No pending Slack notifications found")
+            return
+
+        logging.info(f"Found {len(pending_notifications)} emails requiring Slack notification")
+        
+        # Initialize Slack service
+        from slack_service import SlackNotificationService
+        slack_service = SlackNotificationService()
+
+        for notification in pending_notifications:
+            try:
+                # Get email details
+                email_response = supabase.table("emails").select(
+                    "subject",
+                    "sender_email",
+                    "body_text"
+                ).eq("id", notification["email_id"]).execute()
+
+                if not email_response.data:
+                    logging.error(f"No email found for analysis ID: {notification['id']}")
+                    continue
+
+                email = email_response.data[0]
+
+                # Prepare notification data
+                notification_data = {
+                    "sender": email["sender_email"],
+                    "subject": email["subject"],
+                    "body": email["body_text"],
+                    "summary": notification["summary"]
+                }
+
+                # Send notification
+                message_id = slack_service.send_email_notification(
+                    email_data=notification_data,
+                    importance="medium"
+                )
+
+                # Update analysis record
+                supabase.table("analysis").update({
+                    "slack_notification_sent": True,
+                    "slack_message_id": message_id,
+                    "slack_channel": slack_service.default_channel
+                }).eq("id", notification["id"]).execute()
+
+                logging.info(f"Sent Slack notification for email {notification['email_id']}")
+
+            except Exception as e:
+                logging.error(f"Error processing Slack notification for analysis ID {notification['id']}: {e}")
+                continue
+
+    except Exception as e:
+        logging.error(f"Error in process_slack_notifications: {e}")
+
 def analyze_emails():
     """
     Analyze all unprocessed emails
     """
-    logging.info("Starting email analysis workflow")
     try:
         # Get unprocessed emails
         response = supabase.table("emails").select(
-            "id",  # This is the UUID
-            "message_id",  # This is the Gmail message ID
+            "id",
+            "message_id",
             "subject",
             "body_text",
-            "attachment_summary",
-            "thread_id",
-            "processed"
-        ).eq("processed", False).execute()
-        
-        unprocessed_emails = response.data
-        if not unprocessed_emails:
+            "attachment_summary"
+        ).is_("processed", "false").execute()
+
+        emails = response.data
+        if not emails:
             logging.info("No unprocessed emails found")
             return
 
-        logging.info(f"Found {len(unprocessed_emails)} unprocessed emails")
-        
-        for email in unprocessed_emails:
+        logging.info(f"Found {len(emails)} unprocessed emails")
+
+        for email in emails:
             try:
-                # Convert message_id to UUID format
-                message_id = email.get("message_id")
-                if not message_id:
-                    logging.error("Email missing message_id, skipping...")
-                    continue
-                    
-                # Get the UUID using message_id
-                email_uuid = get_email_uuid_by_message_id(message_id)
-                if not email_uuid:
-                    logging.error(f"Could not find UUID for message_id: {message_id}")
-                    continue
-                
-                # Analyze using the proper UUID
-                analyze_email(message_id)
+                analyze_email(email["message_id"])
             except Exception as e:
-                logging.error(f"Error processing email: {e}")
+                logging.error(f"Error analyzing email {email['id']}: {e}")
                 continue
 
-        logging.info("Email analysis workflow completed")
+        # After analyzing all emails, check for Phase 4
+        process_slack_notifications()
+
     except Exception as e:
-        logging.error(f"Error in email analysis workflow: {e}")
-        import traceback
-        logging.error(traceback.format_exc())
+        logging.error(f"Error in analyze_emails: {e}")
 
 if __name__ == "__main__":
     analyze_emails()
