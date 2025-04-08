@@ -164,7 +164,7 @@ Stores analysis results including summaries, insights, actions, calendar data, S
 
 ## 🧑‍💻 Author
 
-Made with ❤️ by [Your Name](https://github.com/your-profile)
+Made with ❤️ by [Alkaif Ansari](https://github.com/alkaifaftab000)
 
 ---
 
