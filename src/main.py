@@ -20,6 +20,7 @@ from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.probability import FreqDist
 import fitz  # PyMuPDF
+from update_calendar_actions import update_existing_calendar_actions
 
 # Configure logging
 logging.basicConfig(
@@ -88,6 +89,24 @@ def process_emails(mode, batch_size):
         else:
             logging.info("Skipping Slack notifications")
 
+        
+        # Phase 5: Calendar Actions
+        calendar_actions_input = input("\nDo you want to process calendar actions? (yes/no): ").strip().lower()
+        if calendar_actions_input in ['yes', 'y']:
+            logging.info("Phase 5: Starting calendar action processing")
+            
+            # First update action_data for all pending actions
+            logging.info("Updating action data for pending calendar actions...")
+            update_existing_calendar_actions()
+            
+            # Then process the calendar actions
+            from calendar_handler import CalendarHandler
+            calendar_handler = CalendarHandler()
+            results = calendar_handler.process_calendar_actions()
+            logging.info(f"Calendar processing results: {results}")
+            logging.info("Phase 5 Complete: Calendar actions processed")
+        else:
+            logging.info("Skipping calendar actions")
         logging.info("Email processing workflow completed")
 
     except Exception as e:

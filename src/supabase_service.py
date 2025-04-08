@@ -4,11 +4,11 @@ Supabase Service Module
 """
 
 import os
-import io
 import mimetypes
 from supabase import create_client, Client
 import logging
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
 
 # Load environment variables
 load_dotenv()
@@ -19,6 +19,176 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 # Initialize Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Add this class at the top after imports
+class SupabaseService:
+    def __init__(self):
+        self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+    def fetch_calendar_actions(self):
+        """Fetch pending calendar actions from analysis table"""
+        try:
+            response = self.supabase.table('analysis')\
+                .select('*')\
+                .in_('action_type', ['SCHEDULE_MEETING', 'SET_REMINDER'])\
+                .eq('calendar_status', 'PENDING')\
+                .execute()
+            return response.data
+        except Exception as e:
+            logging.error(f"Error fetching calendar actions: {str(e)}")
+            return []
+
+    def update_calendar_action_status(self, action_id, status, message):
+        """Update the status of a calendar action"""
+        try:
+            self.supabase.table('analysis')\
+                .update({
+                    'calendar_status': status,
+                    'calendar_message': message,
+                    'processed_at': datetime.now().isoformat()
+                })\
+                .eq('id', action_id)\
+                .execute()
+            logging.info(f"Updated calendar action {action_id} status to {status}")
+        except Exception as e:
+            logging.error(f"Error updating calendar action status: {str(e)}")
+
+    def extract_action_data(self, text):
+        """Extract action data from text"""
+        try:
+            # Find the Action Data section
+            if 'Action Data:' not in text:
+                return None
+                
+            action_section = text.split('Action Data:')[1].split('Thread Context:')[0]
+            
+            # Initialize action data
+            action_data = {}
+            
+            # Extract key-value pairs
+            lines = action_section.strip().split('\n')
+            for line in lines:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Handle special cases
+                    if key == 'participants':
+                        # Convert string of emails to list
+                        emails = [e.strip() for e in value.strip('[]').split(',') if '@' in e]
+                        action_data[key] = emails
+                    elif key == 'duration_minutes':
+                        # Extract number from string like "60 (assuming a 1-hour meeting)"
+                        try:
+                            duration = int(''.join(filter(str.isdigit, value)))
+                            action_data[key] = str(duration)
+                        except ValueError:
+                            action_data[key] = '60'  # Default to 60 minutes
+                    else:
+                        action_data[key] = value
+
+            # Ensure required fields
+            required_fields = ['date', 'time', 'title', 'description']
+            if not all(field in action_data for field in required_fields):
+                logging.warning(f"Missing required fields in action data: {action_data}")
+                return None
+
+            return action_data
+        except Exception as e:
+            logging.error(f"Error extracting action data: {str(e)}")
+            return None
+
+    def store_analysis_in_supabase(self, analysis_data):
+        """Store email analysis with separate action data"""
+        try:
+            # Extract action data from insights
+            insights = analysis_data.get("insights", "")
+            action_type = analysis_data.get("action_type", "NO_ACTION")
+            
+            # Initialize action_data dictionary
+            action_data = {}
+            
+            if action_type in ['SCHEDULE_MEETING', 'SET_REMINDER']:
+                # Find the Action Data section
+                if 'Action Data:' in insights:
+                    action_section = insights.split('Action Data:')[1].split('Thread Context:')[0]
+                    lines = action_section.strip().split('\n')
+                    
+                    for line in lines:
+                        if ':' in line:
+                            key, value = line.split(':', 1)
+                            key = key.strip()
+                            value = value.strip()
+                            
+                            # Handle special fields
+                            if key == 'participants':
+                                # Convert string representation of list to actual list
+                                value = [email.strip() for email in value.strip('[]').split(',') 
+                                       if '@' in email and email.strip()]
+                            elif key == 'duration_minutes':
+                                # Extract number from string like "60 (assuming a 1-hour meeting)"
+                                try:
+                                    value = str(int(''.join(filter(str.isdigit, value))))
+                                except ValueError:
+                                    value = '60'  # Default duration
+                            elif key == 'date':
+                                if value.lower() == 'today':
+                                    value = datetime.now().strftime('%Y-%m-%d')
+                                elif value.lower() == 'tomorrow':
+                                    value = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                            elif key == 'time':
+                                if value.lower() == 'now':
+                                    value = datetime.now().strftime('%H:%M')
+                                elif "o'clock" in value.lower():
+                                    hour = int(''.join(filter(str.isdigit, value)))
+                                    if 'night' in value.lower() or 'evening' in value.lower():
+                                        hour += 12
+                                    value = f"{hour:02d}:00"
+                                
+                            action_data[key] = value
+
+            # Prepare analysis record with properly formatted action_data
+            analysis_record = {
+                "email_id": str(analysis_data["email_id"]),
+                "thread_id": analysis_data.get("thread_id"),
+                "summary": analysis_data["summary"],
+                "insights": analysis_data["insights"],
+                "action_type": action_type,
+                "action_data": action_data if action_data else None,  # Store as JSONB
+                "calendar_status": "PENDING" if action_type in ['SCHEDULE_MEETING', 'SET_REMINDER'] else None,
+                "search_performed": analysis_data.get("search_performed", False),
+                "search_query": analysis_data.get("search_query", ""),
+                "search_results": analysis_data.get("search_results"),
+                "search_answer": analysis_data.get("search_answer", ""),
+                "slack_notification_sent": analysis_data.get("slack_notification_sent", False),
+                "slack_channel": analysis_data.get("slack_channel"),
+                "slack_message_id": analysis_data.get("slack_message_id")
+            }
+
+            # Insert into Supabase
+            response = self.supabase.table("analysis").insert(analysis_record).execute()
+            
+            if response.data:
+                logging.info(f"Analysis stored successfully for email: {analysis_data['email_id']}")
+                logging.debug(f"Stored action_data: {action_data}")
+                
+                # Mark email as processed
+                update_response = self.supabase.table("emails").update(
+                    {"processed": True}
+                ).eq("id", str(analysis_data["email_id"])).execute()
+                
+                if update_response.data:
+                    logging.info(f"Email {analysis_data['email_id']} marked as processed")
+                else:
+                    logging.error(f"Failed to mark email {analysis_data['email_id']} as processed")
+            else:
+                logging.error(f"Failed to store analysis for email: {analysis_data['email_id']}")
+                
+        except Exception as e:
+            logging.error(f"Error storing analysis: {str(e)}")
+            import traceback
+            logging.error(traceback.format_exc())
 
 def email_exists(message_id):
     """
@@ -164,18 +334,40 @@ def get_email_uuid_by_message_id(message_id):
         print(f"Error getting email UUID for message_id {message_id}: {e}")
         return None
 
-def store_analysis_in_supabase(analysis_data):
-    """
-    Store email analysis (summary and insights) in the Supabase analysis table.
-    """
+def extract_action_data(structured_output):
+    """Extract action data from structured output"""
     try:
-        # The email_id in analysis_data is already the UUID from the database
-        response = supabase.table("analysis").insert({
-            "email_id": str(analysis_data["email_id"]),  # Ensure UUID is string
+        # Split the output into sections
+        sections = structured_output.split('###')
+        for section in sections:
+            if 'ACTION_DATA' in section:
+                # Parse the action data section
+                action_data = {}
+                lines = section.strip().split('\n')[1:]  # Skip the header
+                for line in lines:
+                    if ':' in line:
+                        key, value = line.split(':', 1)
+                        action_data[key.strip()] = value.strip()
+                return action_data
+        return None
+    except Exception as e:
+        logging.error(f"Error extracting action data: {str(e)}")
+        return None
+
+def store_analysis_in_supabase(analysis_data):
+    """Store email analysis with separate action data"""
+    try:
+        # Extract action data from insights if present
+        action_data = extract_action_data(analysis_data.get("insights", ""))
+
+        # Prepare analysis record
+        analysis_record = {
+            "email_id": str(analysis_data["email_id"]),
             "thread_id": analysis_data.get("thread_id"),
             "summary": analysis_data["summary"],
             "insights": analysis_data["insights"],
             "action_type": analysis_data["action_type"],
+            "action_data": action_data,  # Store parsed action data
             "search_performed": analysis_data.get("search_performed", False),
             "search_query": analysis_data.get("search_query", ""),
             "search_results": analysis_data.get("search_results"),
@@ -183,15 +375,17 @@ def store_analysis_in_supabase(analysis_data):
             "slack_notification_sent": analysis_data.get("slack_notification_sent", False),
             "slack_channel": analysis_data.get("slack_channel"),
             "slack_message_id": analysis_data.get("slack_message_id")
-        }).execute()
+        }
 
+        response = supabase.table("analysis").insert(analysis_record).execute()
+        
         if response.data:
             logging.info(f"Analysis stored successfully for email: {analysis_data['email_id']}")
             
-            # Mark the email as processed
+            # Mark email as processed
             update_response = supabase.table("emails").update(
                 {"processed": True}
-            ).eq("id", str(analysis_data["email_id"])).execute()  # Ensure UUID is string
+            ).eq("id", str(analysis_data["email_id"])).execute()
             
             if update_response.data:
                 logging.info(f"Email {analysis_data['email_id']} marked as processed")
