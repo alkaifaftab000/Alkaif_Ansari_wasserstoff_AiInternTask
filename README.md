@@ -1,5 +1,5 @@
 
-# 📬 Intelligent Email Assistant 🤖
+# 📬 AI Personal Email Assistant 🤖
 
 An intelligent, multi-phase assistant that fetches emails, extracts insights using NLP and LLMs, performs smart actions like calendar scheduling and Slack notifications, and optionally replies to emails — all backed by Supabase.
 
