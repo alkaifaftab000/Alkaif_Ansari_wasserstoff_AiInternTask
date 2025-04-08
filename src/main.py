@@ -5,7 +5,9 @@ Main Module
 
 import argparse
 import logging
+from email_reply_service import EmailReplyService
 from gmail_service import authenticate_gmail, fetch_unread_emails, fetch_all_emails
+from llama_api import generate_email_reply
 from supabase_service import store_emails_in_supabase, supabase
 from summarization_service import analyze_emails, analyze_email
 from attachment_service import analyze_attachments
@@ -89,7 +91,6 @@ def process_emails(mode, batch_size):
         else:
             logging.info("Skipping Slack notifications")
 
-        
         # Phase 5: Calendar Actions
         calendar_actions_input = input("\nDo you want to process calendar actions? (yes/no): ").strip().lower()
         if calendar_actions_input in ['yes', 'y']:
@@ -105,8 +106,18 @@ def process_emails(mode, batch_size):
             results = calendar_handler.process_calendar_actions()
             logging.info(f"Calendar processing results: {results}")
             logging.info("Phase 5 Complete: Calendar actions processed")
+            
+            # Phase 6: Email Replies
+            auto_reply_input = input("\nDo you want to send automated replies for completed calendar actions? (yes/no): ").strip().lower()
+            if auto_reply_input in ['yes', 'y']:
+                logging.info("Phase 6: Starting automated reply processing")
+                process_email_replies(service, results)
+                logging.info("Phase 6 Complete: Email replies processed")
+            else:
+                logging.info("Skipping automated replies")
         else:
             logging.info("Skipping calendar actions")
+
         logging.info("Email processing workflow completed")
 
     except Exception as e:
@@ -353,6 +364,44 @@ def extract_text_from_image(file_path):
     except Exception as e:
         logging.error(f"Error extracting text from image: {str(e)}")
         return None
+
+def process_email_replies(service, calendar_results):
+    """Process and send email replies based on calendar actions"""
+    try:
+        logging.info(f"Starting email reply processing with {len(calendar_results)} calendar results")
+        logging.info(f"Calendar results: {calendar_results}")
+        
+        from email_reply_service import EmailReplyService
+        reply_service = EmailReplyService(service)
+
+        # Process replies for calendar actions
+        for result in calendar_results:
+            logging.info(f"Processing calendar result: {result}")
+            if result['status'] == 'COMPLETED':
+                email_id = result.get('email_id')
+                analysis_id = result.get('analysis_id')
+                
+                if email_id and analysis_id:
+                    logging.info(f"Processing reply for email {email_id} with analysis {analysis_id}")
+                    success = reply_service.process_reply(
+                        email_id=email_id,
+                        analysis_id=analysis_id,
+                        require_confirmation=True
+                    )
+                    
+                    if success:
+                        logging.info(f"Successfully processed reply for email {email_id}")
+                    else:
+                        logging.error(f"Failed to process reply for email {email_id}")
+                else:
+                    logging.error(f"Missing email_id or analysis_id in result: {result}")
+            else:
+                logging.info(f"Skipping result with status {result['status']}: {result}")
+
+    except Exception as e:
+        logging.error(f"Error in email reply processing: {str(e)}")
+        import traceback
+        logging.error(traceback.format_exc())
 
 # Main entry point
 if __name__ == "__main__":

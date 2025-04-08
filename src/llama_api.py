@@ -183,3 +183,36 @@ def analyze_attachments():
 
     except Exception as e:
         logging.error(f"Error in analyze_attachments: {e}")
+
+def generate_email_reply(context):
+    """Generate email reply using LLaMA"""
+    try:
+        prompt = f"""
+        Generate a professional email reply based on the following context:
+        
+        Original Subject: {context['original_subject']}
+        Action Type: {context['action_type']}
+        Recipient Name: {context['sender_name']}
+        
+        Action Details:
+        {context['action_details']}
+        
+        Requirements:
+        1. Start with a professional greeting using the recipient's name
+        2. Acknowledge the original email
+        3. Confirm the action taken (meeting scheduled or reminder set)
+        4. Provide relevant details (date, time, location)
+        5. End with a professional closing
+        6. Keep the tone friendly but professional
+        7. Be concise but informative
+        
+        Format the response as a complete email message.
+        """
+
+        response = summarize_text(prompt)
+        if response and "structured_output" in response:
+            return response["structured_output"]
+        return None
+    except Exception as e:
+        logging.error(f"Error generating email reply: {str(e)}")
+        return None

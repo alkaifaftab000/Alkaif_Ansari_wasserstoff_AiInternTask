@@ -77,8 +77,11 @@ class CalendarHandler:
 
                     results.append({
                         'action_id': action['id'],
+                        'email_id': action['email_id'],  # Add this line
                         'status': status,
-                        'message': message
+                        'message': message,
+                        'action_type': action['action_type'],
+                        'action_data': action_data
                     })
 
                 except Exception as e:
